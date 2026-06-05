@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -278,11 +279,70 @@ export function createMailer(config = {}) {
     };
   }
 
+  // Resend HTTP API — usa cuando SMTP_HOST=resend (evita bloqueos de puerto SMTP en Render/Railway)
+  if (host === 'resend') {
+    const apiKey = pass ?? user;
+    const resendClient = config.resendClient ?? new Resend(apiKey);
+
+    async function sendOneResend({ from: f, to: t, replyTo, subject, text, html, attachments }) {
+      try {
+        const payload = { from: f, to: Array.isArray(t) ? t : [t], subject, text, html };
+        if (replyTo) payload.reply_to = replyTo;
+        if (attachments?.length) {
+          payload.attachments = attachments.map(a => ({
+            filename: a.filename,
+            path: a.path,
+            content_type: a.contentType,
+          }));
+        }
+        const { data, error } = await resendClient.emails.send(payload);
+        if (error) return { status: 'failed', to: t, reason: error.message, statusCode: error.statusCode };
+        return { status: 'sent', to: t, messageId: data?.id };
+      } catch (err) {
+        return { status: 'failed', to: t, reason: err?.message, statusCode: err?.statusCode };
+      }
+    }
+
+    return {
+      enabled: true,
+      provider: 'resend',
+      to,
+      async sendLead(lead, id) {
+        const attachments = buildLogoAttachments();
+        const salesResult = await sendOneResend({
+          from, to, replyTo: lead.email,
+          subject: buildSalesSubject(lead),
+          text: buildSalesText(lead, id),
+          html: buildSalesHtml(lead, id),
+          attachments,
+        });
+        const userResult = lead.email
+          ? await sendOneResend({
+              from, to: lead.email,
+              subject: buildUserSubject(),
+              text: buildUserText(lead),
+              html: buildUserHtml(lead),
+              attachments,
+            })
+          : { status: 'skipped', to: '', reason: 'lead sin email' };
+
+        const sentTo = [salesResult, userResult].filter(r => r.status === 'sent').map(r => r.to);
+        const messageIds = [salesResult, userResult].filter(r => r.messageId).map(r => r.messageId);
+        const status = salesResult.status === 'sent' && userResult.status === 'sent' ? 'sent'
+          : salesResult.status === 'sent' || userResult.status === 'sent' ? 'partial' : 'failed';
+        return { status, sentTo, messageIds, results: { sales: salesResult, user: userResult } };
+      },
+    };
+  }
+
   const transporter = config.transporter ?? nodemailer.createTransport({
     host,
     port,
     secure,
     auth: user ? { user, pass } : undefined,
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 15_000,
   });
 
   async function sendOne(msg) {

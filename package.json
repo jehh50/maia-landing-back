@@ -18,7 +18,8 @@
     "jsonwebtoken": "^9.0.3",
     "libphonenumber-js": "^1.13.3",
     "nodemailer": "^6.10.1",
-    "pg": "^8.13.0"
+    "pg": "^8.13.0",
+    "resend": "^6.12.4"
   },
   "devDependencies": {
     "supertest": "^7.0.0",
