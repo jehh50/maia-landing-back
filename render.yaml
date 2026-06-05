@@ -2,31 +2,22 @@ services:
   - type: web
     name: maia-api
     runtime: node
+    plan: free
     buildCommand: npm install
     startCommand: npm start
-    nodeVersion: "22"
     envVars:
       - key: NODE_ENV
         value: production
-      - key: PORT
-        value: "3001"
       - key: DB_SCHEMA
         value: public
       - key: PGSSL
         value: "true"
-
-      # --- Sensitive: set manually in Render dashboard ---
       - key: DATABASE_URL
         sync: false
-
       - key: AUTH_SECRET
         sync: false
-
-      # URL del frontend en Vercel, ej: https://maia-landing.vercel.app
       - key: CORS_ORIGIN
         sync: false
-
-      # --- SMTP (Nodemailer) ---
       - key: SMTP_HOST
         sync: false
       - key: SMTP_PORT
