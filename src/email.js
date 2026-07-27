@@ -1,6 +1,7 @@
 import nodemailer from 'nodemailer';
 import { Resend } from 'resend';
 import path from 'node:path';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -8,10 +9,45 @@ const __dirname = path.dirname(__filename);
 
 // Logos compartidos por ambos correos. Se adjuntan como CID inline para que
 // Outlook/Gmail/Apple Mail los muestren sin permitir descargar imágenes externas.
-const LOGO_PATH = path.resolve(__dirname, '../../docs/images/logo-maia.svg');
-const ISOTIPO_PATH = path.resolve(__dirname, '../../docs/images/isotipo-maia.svg');
+const ASSETS_DIR = path.resolve(__dirname, '../docs/images');
 const LOGO_CID = 'logo-maia';
 const ISOTIPO_CID = 'isotipo-maia';
+
+const MIME_BY_EXT = {
+  '.png':  'image/png',
+  '.jpg':  'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif':  'image/gif',
+  '.svg':  'image/svg+xml',
+};
+
+// Gmail y Outlook no renderizan SVG en correo (Apple Mail sí). Si algún día se
+// añade un PNG junto al SVG, se prefiere automáticamente sin tocar código.
+const EXT_PREFERENCE = ['.png', '.jpg', '.jpeg', '.gif', '.svg'];
+
+/**
+ * Lee un logo de `docs/images` una sola vez al importar el módulo. Devuelve
+ * `null` si no se encuentra: el correo debe salir igual aunque falte el asset
+ * (un lead sin notificar es peor que un correo sin logo).
+ */
+function loadLogo(basename, cid) {
+  for (const ext of EXT_PREFERENCE) {
+    const filename = basename + ext;
+    try {
+      return { filename, content: readFileSync(path.join(ASSETS_DIR, filename)), contentType: MIME_BY_EXT[ext], cid };
+    } catch (err) {
+      if (err?.code !== 'ENOENT') {
+        console.warn(`[mail] no se pudo leer ${filename}: ${err?.message}`);
+      }
+    }
+  }
+  console.warn(`[mail] logo "${basename}" no encontrado en ${ASSETS_DIR} — los correos saldrán sin él.`);
+  return null;
+}
+
+const LOGOS = [loadLogo('logo-maia', LOGO_CID), loadLogo('isotipo-maia', ISOTIPO_CID)].filter(Boolean);
+const HAS_LOGO    = LOGOS.some(l => l.cid === LOGO_CID);
+const HAS_ISOTIPO = LOGOS.some(l => l.cid === ISOTIPO_CID);
 
 // ---------- Helpers ----------
 
@@ -31,11 +67,20 @@ function asBool(v) {
   return false;
 }
 
+// Formato nodemailer: `content` (Buffer) + `cid` + `contentType`.
 function buildLogoAttachments() {
-  return [
-    { filename: 'logo-maia.svg', path: LOGO_PATH, cid: LOGO_CID, contentType: 'image/svg+xml' },
-    { filename: 'isotipo-maia.svg', path: ISOTIPO_PATH, cid: ISOTIPO_CID, contentType: 'image/svg+xml' },
-  ];
+  return LOGOS.map(({ filename, content, contentType, cid }) => ({ filename, content, contentType, cid }));
+}
+
+// Formato Resend: `content` en base64 y `contentId` para el inline (camelCase).
+// `path` en Resend es una URL pública, no una ruta de filesystem.
+function toResendAttachments(attachments) {
+  return attachments.map(a => ({
+    filename:    a.filename,
+    content:     a.content.toString('base64'),
+    contentType: a.contentType,
+    contentId:   a.cid,
+  }));
 }
 
 // ---------- Asunto (ventas) y asunto (usuario) ----------
@@ -102,6 +147,17 @@ function buildUserText(lead) {
 function htmlShell({ title, previewText, bodyHtml }) {
   const preview = escapeHtml(previewText || '');
   const safeTitle = escapeHtml(title || 'MaIA');
+
+  // Si el asset no está disponible, se cae a wordmark de texto en vez de dejar
+  // el icono de imagen rota que mostraría un `cid:` sin adjunto.
+  const logoHtml = HAS_LOGO
+    ? `<img src="cid:${LOGO_CID}" alt="MaIA" width="140" height="36" style="display:block;border:0;outline:none;text-decoration:none;height:36px;width:140px;" />`
+    : `<span style="font-family:'Inter',Arial,sans-serif;font-size:26px;font-weight:700;letter-spacing:-0.02em;color:#1A1410;">MaIA</span>`;
+
+  const isotipoHtml = HAS_ISOTIPO
+    ? `<img src="cid:${ISOTIPO_CID}" alt="MaIA" width="32" height="32" style="display:block;border:0;outline:none;text-decoration:none;margin:0 auto 8px auto;height:32px;width:32px;" />`
+    : '';
+
   return `<!doctype html>
 <html lang="es">
 <head>
@@ -120,7 +176,7 @@ function htmlShell({ title, previewText, bodyHtml }) {
           <!-- HEADER -->
           <tr>
             <td align="center" style="background:#FAFAF9;padding:28px 24px;border-bottom:1px solid #F0EBE8;">
-              <img src="cid:${LOGO_CID}" alt="MaIA" width="140" height="36" style="display:block;border:0;outline:none;text-decoration:none;height:36px;width:140px;filter:brightness(0) invert(1);" />
+              ${logoHtml}
             </td>
           </tr>
           <!-- BODY -->
@@ -132,7 +188,7 @@ function htmlShell({ title, previewText, bodyHtml }) {
           <!-- FOOTER -->
           <tr>
             <td align="center" style="background:#FAFAF9;border-top:1px solid #F0EBE8;padding:24px;">
-              <img src="cid:${ISOTIPO_CID}" alt="MaIA" width="32" height="32" style="display:block;border:0;outline:none;text-decoration:none;margin:0 auto 8px auto;height:32px;width:32px;" />
+              ${isotipoHtml}
               <p style="margin:0;color:#A89E9A;font-family:'Inter',Arial,sans-serif;font-size:12px;line-height:1.5;">
                 MaIA · Agentes de IA para equipos LatAm<br />
                 <a href="https://www.maiabuilder.ai" style="color:#A89E9A;text-decoration:none;">app.maiabuilder.ai</a>
@@ -287,14 +343,8 @@ export function createMailer(config = {}) {
     async function sendOneResend({ from: f, to: t, replyTo, subject, text, html, attachments }) {
       try {
         const payload = { from: f, to: Array.isArray(t) ? t : [t], subject, text, html };
-        if (replyTo) payload.reply_to = replyTo;
-        if (attachments?.length) {
-          payload.attachments = attachments.map(a => ({
-            filename: a.filename,
-            path: a.path,
-            content_type: a.contentType,
-          }));
-        }
+        if (replyTo) payload.replyTo = replyTo;
+        if (attachments?.length) payload.attachments = toResendAttachments(attachments);
         const { data, error } = await resendClient.emails.send(payload);
         if (error) return { status: 'failed', to: t, reason: error.message, statusCode: error.statusCode };
         return { status: 'sent', to: t, messageId: data?.id };
