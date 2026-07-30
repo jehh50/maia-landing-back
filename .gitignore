@@ -1,4 +1,12 @@
 node_modules/
 .env
+.env.local
 *.log
-*.md
+
+# Notas locales que NO se versionan. El resto de .md sí forma parte del arnés
+# (AGENTS.md, CLAUDE.md, CHECKPOINT.md, docs/, progress/) y debe ir a git.
+NOTES.local.md
+scratch/
+
+# Overrides personales de Claude Code (settings.json sí se versiona)
+.claude/settings.local.json
