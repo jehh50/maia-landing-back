@@ -55,11 +55,13 @@ maia-landing-back/
 │   ├── leads.js           # Capa de datos `leads` lectura (listLeads, getLeadById)
 │   ├── leadsRouter.js     # Rutas admin de leads
 │   ├── images.js          # Capa de datos `images` (SQL) + whitelist/sniff de MIME
-│   └── imagesRouter.js    # Rutas públicas (metadatos + /raw) y admin de imágenes
+│   ├── imagesRouter.js    # Rutas públicas (metadatos + /raw) y admin de imágenes
+│   ├── precios.js         # Capa de datos `planes` (SQL) + cálculo de los derivados
+│   └── preciosRouter.js   # Ruta pública de precios y rutas admin de planes
 ├── scripts/
 │   ├── create-user.js     # CLI: crea un usuario
 │   └── seed-users.js      # CLI: asegura el admin inicial (MAIA_ADMIN_EMAIL/PASSWORD)
-├── tests/                 # vitest + supertest, 12 archivos (ver §11)
+├── tests/                 # vitest + supertest, 13 archivos (ver §11)
 ├── docs/                  # Documentación viva (este archivo, context, conventions,
 │   │                      # verification, database, api-contract) + images/ (logos de correo)
 │   └── images/            # logo-maia / isotipo-maia (.png y .svg) — adjuntos CID
@@ -88,6 +90,7 @@ createArticlesRouter({ pool, schema, requireAuth })
 createLeadsRouter({ pool, schema, requireAuth })
 createUsersRouter({ pool, schema, requireAuth })
 createImagesRouter({ pool, schema, requireAuth, maxFileSize })
+createPreciosRouter({ pool, schema, requireAuth })
 createMailer({ host, port, user, pass, from, to, transporter, resendClient })
 createRateLimiter({ windowMs, max, now, keyGenerator })
 ```
@@ -97,13 +100,14 @@ Postgres efímero y un mailer falso, sin monkey-patching.
 
 ### Separación datos / HTTP
 
-`articles.js`, `leads.js`, `images.js` y `users.js` contienen **solo SQL** (más
-helpers puros: `slugify` en el primero, la whitelist de MIME y `sniffMime` en el
-tercero, `isValidRole` y el hasheo bcrypt en el cuarto);
-`articlesRouter.js`, `leadsRouter.js`, `imagesRouter.js` y `usersRouter.js`
-contienen **solo HTTP** (validación, status codes, logging). `db.js` mantiene el
-DDL y el insert de leads. Nota: la escritura de leads (`insertLead`) vive en
-`db.js`, no en `leads.js` — `leads.js` es solo lectura.
+`articles.js`, `leads.js`, `images.js`, `users.js` y `precios.js` contienen
+**solo SQL** (más helpers puros: `slugify` en el primero, la whitelist de MIME y
+`sniffMime` en el tercero, `isValidRole` y el hasheo bcrypt en el cuarto, el
+cálculo de los precios derivados en el quinto);
+`articlesRouter.js`, `leadsRouter.js`, `imagesRouter.js`, `usersRouter.js` y
+`preciosRouter.js` contienen **solo HTTP** (validación, status codes, logging).
+`db.js` mantiene el DDL y el insert de leads. Nota: la escritura de leads
+(`insertLead`) vive en `db.js`, no en `leads.js` — `leads.js` es solo lectura.
 
 ---
 
@@ -138,6 +142,7 @@ articlesRouter      → /api/articles*, /api/admin/articles*
 leadsRouter         → /api/admin/leads*
 usersRouter         → /api/admin/users*  (solo rol admin)
 imagesRouter        → /api/images*, /api/admin/images* (multer por ruta, no global)
+preciosRouter       → /api/precios (público), /api/admin/precios* (solo rol admin)
 GET  /api/health
 POST /api/contact   (con rate limit propio)
 catch-all 404 JSON
@@ -245,6 +250,7 @@ handlers de ruta más el middleware `requireAuth`, repartidos entre `app.js`,
 | `GET`  | `/api/articles/:slug` | Artículo publicado por slug; 404 si es draft |
 | `GET`  | `/api/images` | Metadatos de imágenes (sin `bytes`), filtro `?seccion=`, orden `orden ASC` |
 | `GET`  | `/api/images/:id/raw` | El binario con su `Content-Type` real; 404 si no existe |
+| `GET`  | `/api/precios` | Planes de la sección de precios, orden `orden ASC` (§7.2) |
 
 ### Auth
 
@@ -273,6 +279,10 @@ handlers de ruta más el middleware `requireAuth`, repartidos entre `app.js`,
 | `POST`   | `/api/admin/images` | **admin** únicamente (multipart/form-data) |
 | `PATCH`  | `/api/admin/images/:id` | **admin** únicamente |
 | `DELETE` | `/api/admin/images/:id` | **admin** únicamente |
+| `GET`    | `/api/admin/precios/:id` | **admin** únicamente |
+| `POST`   | `/api/admin/precios` | **admin** únicamente |
+| `PATCH`  | `/api/admin/precios/:id` | **admin** únicamente |
+| `DELETE` | `/api/admin/precios/:id` | **admin** únicamente |
 
 ---
 
@@ -398,6 +408,23 @@ credenciales nuevas que hoy no existen. Se acepta el peso en la BD.
 > por `getImageWithBytes()`, que a su vez solo la llama
 > `GET /api/images/:id/raw`. Cualquier query nueva usa `META_COLS`.
 
+**`planes`** (feature 9)
+| columna | tipo |
+|---|---|
+| `id` | BIGSERIAL PK |
+| `nombre` | TEXT NOT NULL |
+| `precio_mensual` | NUMERIC(10,2) NOT NULL DEFAULT `0` |
+| `descuento_pct` | NUMERIC(5,2) NOT NULL DEFAULT `0` (descuento anual, **por plan**) |
+| `vinetas`, `vinetas_tachadas` | JSONB NOT NULL DEFAULT `'[]'` (array de strings) |
+| `destacado` | BOOLEAN NOT NULL DEFAULT `false` (badge "Más popular") |
+| `trial_texto` | TEXT (p. ej. "14 días de prueba gratis") |
+| `es_custom` | BOOLEAN NOT NULL DEFAULT `false` (Enterprise: la web dice "Custom") |
+| `orden` | INTEGER NOT NULL DEFAULT `0` |
+| `created_at`, `updated_at` | TIMESTAMPTZ NOT NULL DEFAULT NOW() |
+
+Índice: `planes_orden_idx (orden)`. Orden de listado: `orden ASC, id ASC`.
+Ver §7.2 para lo que no se deduce del DDL.
+
 ### 7.1 Validación de imágenes subidas — y por qué SVG está excluido
 
 Whitelist de MIME: **`image/png`, `image/jpeg`, `image/webp`**.
@@ -444,6 +471,48 @@ columna BYTEA. Al superarse el límite multer emite un `MulterError`
 (`LIMIT_FILE_SIZE`) que el router **atrapa explícitamente** y traduce a
 `413 { error, field: 'file' }` JSON; sin ese wrapper el error acabaría como un
 `500` genérico en `errorHandler`.
+
+### 7.2 Precios: tres cosas que no se deducen del DDL (feature 9)
+
+`src/preciosRouter.js` (HTTP, cero SQL) sobre `src/precios.js` (SQL + helpers
+puros). **Alcance: solo planes** — los complementos y sus paquetes son la
+feature 10 y no tienen tabla ni endpoint todavía.
+
+1. **`precio_anual` y `ahorro_anual` no se almacenan: se derivan.** El `%` de
+   descuento es la fuente de verdad (decisión del humano) y es **por plan**, no
+   global:
+   ```js
+   precio_anual = Math.round(precio_mensual * (1 - descuento_pct / 100));
+   ahorro_anual = Math.round((precio_mensual - precio_anual) * 12);
+   ```
+   Persistirlos permitiría que se desincronizaran del precio o del descuento;
+   por eso no son columnas ni campos editables, y un `PATCH` que solo los traiga
+   responde `422`. **`precio_anual` es el precio MENSUAL facturando anualmente,
+   no el total del año** — el mismo significado que el campo `annual` que el
+   front tiene hoy hardcodeado, confirmado por la aritmética de los ahorros que
+   la web muestra (`(19−17)×12 = 24`, `(199−179)×12 = 240`,
+   `(599−540)×12 = 708`). Interpretarlo como total anual dejaría todos los
+   precios mal por un factor de 12. El chip de la web dice "Ahorra 10 %", pero
+   los precios están redondeados a mano: solo un `descuento_pct` por plan
+   reproduce los tres exactos (Growth necesita `9.85`, con `10` daría 539/720).
+2. **El dinero va en `NUMERIC`, y `pg` lo devuelve como string.** Las columnas
+   son `NUMERIC(10,2)`/`NUMERIC(5,2)`, nunca `float`/`double`: un error de coma
+   flotante en un precio es inaceptable. A cambio, el driver `pg` entrega
+   `NUMERIC` como **string** de JavaScript (`"19.00"`) para no perder precisión,
+   así que `toPlan()` (`src/precios.js`) convierte a número antes de responder —
+   es el único punto por el que salen las filas de la tabla. No se registra un
+   parser global de tipos de `pg`: sería un efecto global sobre cualquier
+   `NUMERIC` futuro de cualquier módulo, justo lo contrario del patrón de
+   factories con DI.
+3. **El caso Custom (Enterprise) devuelve los derivados en `null`.** Con
+   `es_custom = true` la web no muestra cifra, y el plan tiene
+   `precio_mensual = 0`: si los derivados salieran calculados, el front
+   anunciaría "ahorras $0/año". `precio_mensual` y `descuento_pct` sí conservan
+   su valor almacenado para que el panel pueda editarlos.
+
+Las viñetas se validan en el router (`array` de `string`) **antes** de
+persistir: `JSONB` acepta cualquier cosa —un número, un objeto, un array
+anidado— y el front reventaría al renderizar la lista.
 
 ### Multi-tenancy por schema
 
@@ -621,9 +690,9 @@ nunca lanza. Se usa para poblar `pais`/`pais_iso` del lead y alimentar el filtro
 
 ## 11. Testing
 
-`vitest run` + `supertest`. 12 archivos: `contact`, `email`, `articles`,
+`vitest run` + `supertest`. 13 archivos: `contact`, `email`, `articles`,
 `auth`, `leads`, `phone`, `roles`, `roles.schema`, `app`, `ratelimit`,
-`images`, `users`.
+`images`, `users`, `precios`.
 
 **Estrategia**: tests de integración reales contra Postgres, no mocks de DB.
 Cada suite crea un schema único (`maia_test_<ts>_<rand>`), corre `ensureSchema`,
@@ -744,6 +813,10 @@ si no lo crea como admin.
 | El `editor` sí borra publicaciones | El rol se define como "ver, crear, editar y eliminar una publicación"; el `DELETE` era la única excepción. Decisión del humano (feature 8) |
 | Borrado de usuario físico, sin columna `activo` | `articles.author_id` ya es `ON DELETE SET NULL`: los artículos sobreviven sin necesidad de borrado lógico, y el flujo de login no cambia. Decisión del humano (feature 8) |
 | Guarda del último admin con transacción + `FOR UPDATE`, no con un `COUNT` previo | Un `COUNT` suelto es una condición de carrera: dos borrados concurrentes dejarían el sistema sin ningún admin (§8.1) |
+| Precio anual y ahorro **derivados**, no columnas | El `%` de descuento es la fuente de verdad; almacenarlos permitiría desincronizarlos del precio (§7.2). Decisión del humano (feature 9) |
+| `descuento_pct` por plan, no global | Los precios de la web están redondeados a mano: con un 10 % plano Growth daría 539 en vez de 540 (§7.2) |
+| Dinero en `NUMERIC` + conversión a número en `toPlan()` | `float`/`double` es inaceptable para precios; `pg` devuelve `NUMERIC` como string y el front espera un número (§7.2) |
+| Plan `es_custom` → derivados en `null`, no en `0` | Enterprise no publica cifra; un `0` se renderizaría como "ahorras $0/año" (§7.2) |
 
 ---
 

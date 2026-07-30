@@ -126,6 +126,64 @@ que el front pone en `src`.
 
 `404` tanto si el id no existe como si no es numérico (nunca un 500).
 
+### `GET /api/precios`
+
+Planes de la sección de precios de la landing. Público, sin cookie. Sin
+parámetros. Orden: **`orden` ASC**, `id` ASC como desempate.
+
+> **Alcance:** solo **planes**. Los complementos (add-ons) y sus paquetes son la
+> feature 10 y todavía no tienen endpoint.
+
+```json
+200 { "rows": [
+  { "id": "1",
+    "nombre": "Starter",
+    "precio_mensual": 19,
+    "descuento_pct": 10,
+    "precio_anual": 17,
+    "ahorro_anual": 24,
+    "vinetas": ["1 usuario", "500 créditos"],
+    "vinetas_tachadas": [],
+    "destacado": false,
+    "trial_texto": "14 días de prueba gratis",
+    "es_custom": false,
+    "orden": 1,
+    "created_at": "…", "updated_at": "…" } ] }
+```
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| `precio_mensual` | **número** | Precio facturando mes a mes |
+| `descuento_pct` | **número** | Descuento por pago anual, por plan, en `[0,100]` |
+| `precio_anual` | **número** \| `null` | **DERIVADO.** Precio **mensual** facturando anualmente, **no** el total del año |
+| `ahorro_anual` | **número** \| `null` | **DERIVADO.** Lo que se ahorra en un año completo |
+| `vinetas`, `vinetas_tachadas` | array de strings | Las líneas que el front pinta como bullets |
+| `destacado` | boolean | Badge "Más popular" |
+| `trial_texto` | string \| `null` | p. ej. "14 días de prueba gratis" |
+| `es_custom` | boolean | `true` → el front muestra "Custom" en vez de una cifra |
+
+> **`precio_anual` y `ahorro_anual` son DERIVADOS y NO son editables.** No
+> existen como columnas: se calculan en cada respuesta como
+> `precio_anual = Math.round(precio_mensual * (1 - descuento_pct/100))` y
+> `ahorro_anual = Math.round((precio_mensual - precio_anual) * 12)`. Mandarlos
+> en el body de un `POST`/`PATCH` **no hace nada**: para cambiarlos se edita
+> `precio_mensual` o `descuento_pct`. Un `PATCH` que solo los traiga a ellos
+> responde `422`.
+
+> **`precio_anual` no es el total del año.** Es el precio **mensual** cuando se
+> factura anualmente — el mismo significado que el campo `annual` que el front
+> tiene hoy hardcodeado. Lo confirma la aritmética de los ahorros que la web
+> muestra: `(19−17)×12 = 24`, `(199−179)×12 = 240`, `(599−540)×12 = 708`.
+
+> **Los importes son números, no strings.** El driver `pg` devuelve `NUMERIC`
+> como string (`"19.00"`); la API convierte antes de responder. Si alguna vez
+> ves `"precio_mensual": "19.00"` en una respuesta, es un bug del backend.
+
+> **Caso Custom:** con `es_custom: true`, `precio_anual` y `ahorro_anual` valen
+> `null` (no `0`): el plan no publica cifra y el front no debe renderizar
+> "ahorras $0/año". `precio_mensual` y `descuento_pct` sí conservan su valor
+> almacenado, para que el panel pueda editarlos.
+
 ---
 
 ## Auth
@@ -362,6 +420,74 @@ Body JSON. Campos editables: **`alt`, `orden`, `seccion`** — y solo esos.
 
 Un body que solo traiga campos no editables (`mime_type`, `filename`,
 `size_bytes`, `bytes`…) responde `422` y **no modifica nada**.
+
+### Precios / planes (feature 9)
+
+| Método | Ruta | Roles | Respuesta |
+|---|---|---|---|
+| `GET` | `/api/admin/precios/:id` | **admin** | `200 { plan }` · `404` |
+| `POST` | `/api/admin/precios` | **admin** | `201 { plan }` · `422 { error, field }` |
+| `PATCH` | `/api/admin/precios/:id` | **admin** | `200 { plan }` · `404` · `422 { error }` · `422 { error, field }` |
+| `DELETE` | `/api/admin/precios/:id` | **admin** | `204` sin body · `404` |
+
+`GET /api/precios` es **público** (ver arriba); las cuatro rutas de
+`/api/admin/precios` son **solo `admin`**: sin cookie → `401`, con rol `editor`
+→ `403`. El objeto `plan` tiene exactamente la misma forma que las filas de
+`GET /api/precios`.
+
+`404` tanto si el id no existe como si no es numérico o desborda un `bigint`
+(nunca un 500).
+
+#### `POST /api/admin/precios`
+
+| Campo | Obligatorio | Reglas |
+|---|---|---|
+| `nombre` | **sí** | string no vacío, truncado a 120 |
+| `precio_mensual` | no (default `0`) | número (o string numérico) ≥ 0 y ≤ 99999999.99 |
+| `descuento_pct` | no (default `0`) | número en `[0,100]` |
+| `vinetas`, `vinetas_tachadas` | no (default `[]`) | **array de strings** |
+| `destacado`, `es_custom` | no (default `false`) | booleano |
+| `trial_texto` | no (default `null`) | string (truncado a 200) o `null` |
+| `orden` | no (default `0`) | entero ≥ 0 |
+
+`precio_anual` y `ahorro_anual` **no se envían**: son derivados (ver arriba).
+
+```json
+201 { "plan": { … } }
+422 { "error": "nombre requerido", "field": "nombre" }
+422 { "error": "precio_mensual no puede ser negativo", "field": "precio_mensual" }
+422 { "error": "precio_mensual debe ser un número", "field": "precio_mensual" }
+422 { "error": "descuento_pct debe ser un número entre 0 y 100", "field": "descuento_pct" }
+422 { "error": "vinetas debe ser un array de strings", "field": "vinetas" }
+422 { "error": "orden debe ser un entero >= 0", "field": "orden" }
+```
+
+#### `PATCH /api/admin/precios/:id`
+
+Body JSON. Campos editables: los mismos nueve del `POST` (`nombre`,
+`precio_mensual`, `descuento_pct`, `vinetas`, `vinetas_tachadas`, `destacado`,
+`trial_texto`, `es_custom`, `orden`) — y solo esos. Todos opcionales; lo que no
+venga se conserva.
+
+```json
+200 { "plan": { … } }
+404 { "error": "Plan no encontrado" }
+422 { "error": "Nada que actualizar: se esperaba nombre, precio_mensual, …" }
+```
+
+Un body vacío, o que solo traiga campos **no editables** (`id`, `precio_anual`,
+`ahorro_anual`, `created_at`, `updated_at`…), responde `422` y **no modifica
+nada**.
+
+#### `DELETE /api/admin/precios/:id`
+
+```
+204  (sin body)
+404 { "error": "Plan no encontrado" }
+```
+
+Borrado físico de la fila. No hay guardas de "último plan": la sección de
+precios puede quedarse vacía si el mantenedor así lo decide.
 
 ---
 

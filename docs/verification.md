@@ -52,10 +52,11 @@ importante, no lo confundas con "la app entera pasó los tests"**:
   de Postgres (`23505`, etc.).
 - `POST /api/contact`, el flujo completo de leads, artículos, imágenes
   (incluido el binario BYTEA y el `/raw`), el CRUD de usuarios (bcrypt, la
-  guarda del último admin, `ON DELETE SET NULL` de `author_id`), auth
-  (login/JWT contra usuarios reales), rate limiting montado sobre `createApp()`,
-  ni el middleware de errores montado sobre una app real — todo eso vive en los
-  otros 9 archivos y **solo** corre con `npm test`.
+  guarda del último admin, `ON DELETE SET NULL` de `author_id`), el CRUD de
+  precios (incluida la conversión de los `NUMERIC` que `pg` devuelve como
+  string), auth (login/JWT contra usuarios reales), rate limiting montado sobre
+  `createApp()`, ni el middleware de errores montado sobre una app real — todo
+  eso vive en los otros 10 archivos y **solo** corre con `npm test`.
 - La migración `ALTER TABLE users ADD COLUMN role` (`ensureSchema`), que se
   separó a propósito a `tests/roles.schema.test.js` — sigue necesitando DB y
   solo corre con `npm test`.
@@ -91,29 +92,39 @@ desactualizada.
 
 ## 3. Baseline conocido
 
-Última corrida verde de referencia (2026-07-30, feature 8):
+Última corrida verde de referencia (2026-07-30, feature 9):
 
 ```
 npm test
-Test Files  12 passed (12)
-     Tests  221 passed (221)
+Test Files  13 passed (13)
+     Tests  291 passed (291)
   Duration  ~20-30 s
 ```
 
 Archivos: `contact`, `email`, `articles`, `auth`, `leads`, `phone`, `roles`,
-`roles.schema`, `app`, `ratelimit`, `images`, `users`. `users.test.js` (53
-tests) entró con la feature 8 (CRUD de usuarios), que además convirtió en 3 el
-test de `articles.test.js` que afirmaba `403` para el `editor` en el `DELETE` de
-artículos (ese permiso cambió a propósito: ahora es `204`; el test se
-**actualizó**, no se borró, y el archivo pasó de 13 a 15 tests). El baseline
-anterior era 11 archivos / 166 tests (feature 7) y ningún test se eliminó ni se
-marcó `skip`. `images.test.js` (49 tests) entró con la feature 7; antes de ella
-el baseline era 10 archivos / 117 tests (feature 4).
-`roles.test.js` y `roles.schema.test.js`
-son dos archivos desde la feature 4 (split para separar la parte pura de
-`roles.js` de la migración `ALTER TABLE users ADD COLUMN role`, que sí
-necesita DB) — el total de tests de "roles" (15) no cambió, solo su reparto
-entre dos archivos.
+`roles.schema`, `app`, `ratelimit`, `images`, `users`, `precios`.
+
+Historia del recuento, de lo más reciente a lo más antiguo:
+
+- **Feature 9 (CRUD de precios — solo planes): 12 archivos / 221 tests → 13 /
+  291.** Entró `precios.test.js` (70 tests). Además amplió **una aserción** de
+  `tests/users.test.js`: el test que inventariaba las tablas creadas en
+  `src/db.js` afirmaba la lista exacta `articles, images, leads, users` y ahora
+  incluye `planes`, porque esta feature sí añade DDL. El test se **actualizó y
+  comentó**, no se borró, y el recuento de ese archivo no cambió (53).
+- **Feature 8 (CRUD de usuarios): 11 archivos / 166 tests → 12 / 221.** Entró
+  `users.test.js` (53 tests). Además convirtió en `204` el test de
+  `articles.test.js` que afirmaba `403` para el `editor` en el `DELETE` de
+  artículos (ese permiso cambió a propósito; el test se **actualizó**, no se
+  borró, y el archivo pasó de 13 a 15 tests).
+- **Feature 7 (CRUD de imágenes): 10 archivos / 117 tests → 11 / 166.** Entró
+  `images.test.js` (49 tests).
+- **Feature 4:** `roles.test.js` y `roles.schema.test.js` son dos archivos desde
+  entonces (split para separar la parte pura de `roles.js` de la migración
+  `ALTER TABLE users ADD COLUMN role`, que sí necesita DB) — el total de tests
+  de "roles" (15) no cambió, solo su reparto entre dos archivos.
+
+En ninguna de esas features se eliminó ni se marcó `skip` un solo test.
 
 ```
 npm run test:no-db
@@ -130,7 +141,8 @@ de review automático.
 - **stderr esperado**: `[auth] AUTH_SECRET no configurada…` en `contact.test.js`
   es normal (la suite no define secreto). Cualquier otro warning nuevo es tuyo.
 - **Sin `console.log` de debug** en `src/`. Los logs legítimos llevan prefijo
-  (`[startup]`, `[mail]`, `[leads]`, `[articles]`).
+  (`[startup]`, `[mail]`, `[leads]`, `[articles]`, `[images]`, `[users]`,
+  `[precios]`).
 - **Schemas huérfanos**: si una suite se corta a mitad puede dejar
   `maia_test_*`. Compruébalo y límpialo:
 
@@ -159,7 +171,7 @@ node scripts/create-user.js admin@maiabuilder.ai <password> "Admin"
 
 ## 6. Checklist antes de cerrar
 
-1. `npm test` → 12/12 archivos (221 tests), sin tests eliminados sin justificar.
+1. `npm test` → 13/13 archivos (291 tests), sin tests eliminados sin justificar.
    Si tocaste solo `phone`/`email`/`roles` puedes iterar rápido con
    `npm run test:no-db` (§1.1), pero **no sustituye** a `npm test` para cerrar.
 2. Los criterios de `acceptance` de tu feature tienen **un test que los cubre**.

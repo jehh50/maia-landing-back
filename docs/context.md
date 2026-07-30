@@ -12,8 +12,9 @@ responsabilidades, en orden de importancia de negocio:
 2. **Enviar correos transaccionales** (aviso a ventas + confirmación al usuario).
    Best-effort: importante, pero nunca debe bloquear la captura del lead.
 3. **Panel admin**: login con cookie, CRUD de artículos (blog), consulta de
-   leads, CRUD de las imágenes de las secciones de la landing (feature 7) y
-   mantenedor de usuarios/roles (feature 8, solo `admin`).
+   leads, CRUD de las imágenes de las secciones de la landing (feature 7),
+   mantenedor de usuarios/roles (feature 8, solo `admin`) y mantenedor de los
+   planes de la sección de precios (feature 9, solo `admin`).
 
 ## 2. Repos hermanos
 
@@ -40,7 +41,8 @@ aunque los tests locales sigan verdes.
 | Doble proveedor de correo (SMTP / Resend HTTP) | Render free bloquea puertos SMTP salientes | `architecture.md` §9 |
 | Multi-tenancy por `DB_SCHEMA` interpolado | Es lo que aísla los tests; **nunca** viene de input de usuario | `database.md` |
 | Imágenes subidas con el binario en Postgres (BYTEA) | El filesystem de Render es efímero y un proveedor externo (S3/Cloudinary) pediría credenciales nuevas | `architecture.md` §7 / §7.1 |
-| El `editor` gestiona solo el blog (incluido borrar publicaciones); usuarios e imágenes son solo de `admin` | Es la definición del rol; repartir cuentas y roles es administración del sistema | `architecture.md` §8 / §8.1 |
+| El `editor` gestiona solo el blog (incluido borrar publicaciones); usuarios, imágenes y precios son solo de `admin` | Es la definición del rol; repartir cuentas y tocar los precios es administración del sistema | `architecture.md` §8 / §8.1 |
+| El precio anual y el ahorro se **derivan** del precio mensual y de un `%` por plan | El `%` es la fuente de verdad; almacenarlos permitiría desincronizarlos | `architecture.md` §7.2 |
 | Borrado de usuario físico, y no se puede borrar al último `admin` | Los artículos sobreviven por `ON DELETE SET NULL`, así que no hace falta borrado lógico; quedarse sin admins deja el panel inaccesible | `architecture.md` §8.1 |
 
 ## 4. Restricciones del entorno

@@ -9,6 +9,7 @@ import { createArticlesRouter } from './articlesRouter.js';
 import { createLeadsRouter } from './leadsRouter.js';
 import { createUsersRouter } from './usersRouter.js';
 import { createImagesRouter } from './imagesRouter.js';
+import { createPreciosRouter } from './preciosRouter.js';
 import { asyncHandler } from './asyncHandler.js';
 import { createRateLimiter } from './rateLimit.js';
 
@@ -131,6 +132,11 @@ export function createApp(options = {}) {
     requireAuth: auth.requireAuth,
     maxFileSize: options.images?.maxFileSize,
   }));
+
+  // --- Precios: planes de la landing (feature 9) ---
+  // `GET /api/precios` es público; las cuatro rutas `/api/admin/precios*` son
+  // solo rol admin.
+  app.use(createPreciosRouter({ pool, schema, requireAuth: auth.requireAuth }));
 
   app.get('/api/health', asyncHandler(async (_req, res) => {
     try {

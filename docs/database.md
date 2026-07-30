@@ -73,6 +73,7 @@ Este mecanismo es exactamente el que aísla los tests: cada suite usa
 | `users` | `id` BIGSERIAL | `email` UNIQUE, siempre lowercase; `password_hash` bcrypt 12 rounds; `role` default `'editor'` (ver abajo) |
 | `articles` | `id` BIGSERIAL | `slug` UNIQUE; `status` `draft`\|`published`; `author_id` → `users(id)` ON DELETE SET NULL |
 | `images` | `id` BIGSERIAL | **El binario vive aquí**: `bytes` BYTEA NOT NULL. `seccion` (`hero`\|`cta_final`); índice `(seccion, orden)` |
+| `planes` | `id` BIGSERIAL | Planes de la sección de precios. Dinero en `NUMERIC`; `precio_anual`/`ahorro_anual` **no son columnas** (ver abajo); índice `(orden)` |
 
 Detalle columna por columna: `architecture.md` §7.
 
@@ -140,6 +141,51 @@ exigiría credenciales nuevas que hoy no existen. Se acepta el peso en la BD.
 Cambiar el binario de una imagen es un `POST` nuevo, no un `PATCH`: el `PATCH`
 solo toca `alt`, `orden` y `seccion` (ver `docs/api-contract.md`).
 
+### `planes` — precios de la landing (feature 9)
+
+**Alcance: solo planes.** Los complementos (add-ons) y sus paquetes son la
+feature 10 y **no** tienen tabla aquí.
+
+| columna | tipo | notas |
+|---|---|---|
+| `id` | BIGSERIAL PK | |
+| `nombre` | TEXT NOT NULL | `Starter`, `Team`, `Growth`, `Enterprise`… máx. 120 |
+| `precio_mensual` | NUMERIC(10,2) NOT NULL DEFAULT 0 | Precio facturando **mes a mes** |
+| `descuento_pct` | NUMERIC(5,2) NOT NULL DEFAULT 0 | Descuento por pago anual, **por plan** (no global), en `[0,100]` |
+| `vinetas` | JSONB NOT NULL DEFAULT `'[]'` | Array de **strings**: las líneas que el front pinta como bullets |
+| `vinetas_tachadas` | JSONB NOT NULL DEFAULT `'[]'` | Idem, pero atenuadas/tachadas (el `dim` del front; hoy vacío en los 4 planes) |
+| `destacado` | BOOLEAN NOT NULL DEFAULT false | Badge "Más popular" |
+| `trial_texto` | TEXT NULL | p. ej. "14 días de prueba gratis" |
+| `es_custom` | BOOLEAN NOT NULL DEFAULT false | Enterprise: la web muestra "Custom" en vez de una cifra |
+| `orden` | INTEGER NOT NULL DEFAULT 0 | Orden de aparición en la sección |
+| `created_at`, `updated_at` | TIMESTAMPTZ NOT NULL DEFAULT NOW() | |
+
+Índice: `planes_orden_idx (orden)`. Orden de listado: `orden ASC, id ASC`.
+
+**Dinero en `NUMERIC`, jamás `float`/`double`.** Un error de coma flotante en un
+precio es inaceptable y no hay ninguna razón de rendimiento para arriesgarlo.
+
+> **Trampa del driver, con test propio:** `pg` devuelve una columna `NUMERIC`
+> como **string** de JavaScript (`"19.00"`), no como número — es su forma de no
+> perder precisión en valores que no caben en un `double`. Si no se convierte,
+> el front recibe `"19.00"` donde espera `19` y cualquier comparación numérica
+> falla en silencio. `src/precios.js` convierte con `toNumber()` en `toPlan()`,
+> que es el único sitio por el que salen las filas de esta tabla. **No** se
+> registra un parser global de tipos de `pg`: sería un efecto global que
+> afectaría a cualquier `NUMERIC` futuro de cualquier módulo.
+
+> **`precio_anual` y `ahorro_anual` NO son columnas.** Se calculan en cada
+> respuesta a partir de `precio_mensual` y `descuento_pct`:
+> `precio_anual = Math.round(precio_mensual * (1 - descuento_pct/100))` y
+> `ahorro_anual = Math.round((precio_mensual - precio_anual) * 12)`.
+> Persistirlos permitiría que se desincronizaran del precio o del descuento —
+> el `%` es la fuente de verdad (decisión del humano). `precio_anual` es el
+> precio **mensual** facturando anualmente, no el total del año.
+
+> **Caso Custom:** con `es_custom = true`, los dos derivados salen en `null`.
+> Un plan sin cifra pública (Enterprise, `precio_mensual = 0`) no puede acabar
+> anunciando "ahorras $0/año".
+
 ### Invariantes que los tests protegen
 
 - `users.email` se normaliza a **lowercase + trim** en escritura y en lectura.
@@ -157,6 +203,12 @@ solo toca `alt`, `orden` y `seccion` (ver `docs/api-contract.md`).
 - `images.mime_type` guarda el MIME **verificado por magic bytes**, no el que
   declaró el cliente.
 - Orden de listado de imágenes: `orden ASC, id ASC`.
+- `planes.precio_mensual` y `planes.descuento_pct` salen por la API como
+  **número**, no como el string que devuelve `pg`.
+- `precio_anual` y `ahorro_anual` no existen como columnas: son derivados y no
+  son editables por la API.
+- Un plan con `es_custom = true` devuelve los dos derivados en `null`.
+- Orden de listado de planes: `orden ASC, id ASC`.
 
 ### Detalle frágil conocido
 

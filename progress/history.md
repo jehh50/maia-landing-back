@@ -826,3 +826,249 @@ anotados a propósito:
 **Estado final:** feature 8 marcada `done` (`closed: 2026-07-30`) en
 `feature_list.json` tras el APPROVED, y este resumen movido a
 `progress/history.md`.
+
+---
+
+## 2026-07-30 — feature 9: CRUD de precios (solo planes)
+
+**Resultado:** done (APPROVED sin bloqueantes, `progress/review_9.md`)
+**Alcance:** SOLO PLANES — los complementos y sus paquetes son la feature 10
+**Verificación:** `npm test` → 13 archivos / 291 tests (baseline previo 12 / 221)
+
+## Plan
+
+- [x] Tabla `planes` en `ensureSchema()` de `src/db.js` (`CREATE TABLE IF NOT EXISTS`, C9)
+- [x] `src/precios.js`: capa de datos (SQL + helpers puros de cálculo derivado y
+      conversión de `NUMERIC`), sin express, sin `req`/`res`
+- [x] `src/preciosRouter.js`: GET público + 4 rutas admin, cero SQL, `parseId`
+      con guard de rango de `bigint` copiado de `imagesRouter.js`/`usersRouter.js`
+- [x] `src/app.js`: montar el router (import + una línea de `app.use`)
+- [x] `tests/precios.test.js`: un `describe` por criterio del `acceptance`
+- [x] Docs: `api-contract.md`, `architecture.md`, `database.md`, `verification.md`,
+      `context.md`, `conventions.md`
+
+**Fuera de alcance (feature 10):** complementos y paquetes. No se creó ninguna
+tabla `complementos` ni `paquetes`, ni ningún módulo `complementos.js` /
+`paquetes.js` (hay test que lo comprueba).
+
+## Archivos tocados
+
+| Archivo | Qué cambió |
+|---|---|
+| `src/db.js` | **NUEVO DDL**: `CREATE TABLE IF NOT EXISTS "${schema}".planes` + `CREATE INDEX IF NOT EXISTS planes_orden_idx`, al final de `ensureSchema()`. Cero `DROP`, cero `ALTER`, cero mutación de datos |
+| `src/precios.js` | **NUEVO**. Capa de datos de `planes`: `createPlan`, `listPlanes`, `getPlanById`, `updatePlan`, `deletePlan` + helpers puros `toNumber`, `calcPrecioAnual`, `calcAhorroAnual`, `isStringArray`, `toPlan`. No importa nada (ni express) |
+| `src/preciosRouter.js` | **NUEVO**. 5 endpoints, cero SQL. `parseId` con guard de `bigint`, `validarPlan` (422 `{ error, field }`) |
+| `src/app.js` | Import de `createPreciosRouter` + un `app.use(...)`. Nada más |
+| `tests/precios.test.js` | **NUEVO**. 70 tests, un `describe` por cada uno de los 15 criterios |
+| `tests/users.test.js` | **1 línea de assert actualizada** (ver "Test existente actualizado" abajo). Ningún test borrado ni skipeado |
+| `docs/api-contract.md` | `GET /api/precios` (público, con la forma exacta de la fila) + sección "Precios / planes (feature 9)" con las 4 rutas admin. Deja explícito que `precio_anual`/`ahorro_anual` son DERIVADOS y **no editables** |
+| `docs/architecture.md` | §2 (árbol + factories + separación de capas), §4 (pipeline), §5 (tablas de endpoints), §7 (columnas de `planes`), **§7.2 nueva** (las tres cosas que no se deducen del DDL), §11 (13 archivos de test), §13 (4 decisiones nuevas) |
+| `docs/database.md` | §5 (tabla en el índice), subsección `planes` nueva (columnas, trampa del `NUMERIC`, derivados, caso Custom), invariantes |
+| `docs/context.md` | §1 (el panel también mantiene precios) y §3 (dos decisiones) |
+| `docs/conventions.md` | §3 (separación de capas incluye `precios.js`/`preciosRouter.js`) y §6 (prefijo de log `[precios]`) |
+| `docs/verification.md` | §3 baseline nuevo y §6 checklist |
+| `feature_list.json` | **Solo el `status` de la feature 9**: `pending` → `in_progress`. El resto del diff de este archivo (las entradas nuevas de las features 10 y 11) **NO es mío: lo añadió el leader**, no el implementer de esta sesión |
+
+## Decisiones tomadas
+
+1. **`annual` es el precio MENSUAL facturando anualmente, no el total del año.**
+   Es lo que significa el campo `annual` del front y lo confirma la aritmética
+   de los ahorros hardcodeados: `(19−17)×12 = 24`, `(199−179)×12 = 240`,
+   `(599−540)×12 = 708`. Tratarlo como total anual habría dejado todos los
+   precios mal por un factor de 12. Hay un test explícito de esto
+   (*"el ahorro es la diferencia MENSUAL por 12…"*).
+2. **Los `NUMERIC` se convierten a número en la capa de datos.** `pg` devuelve
+   `NUMERIC` como **string** (`"19.00"`). La conversión vive en `toNumber()`,
+   llamado desde `toPlan()`, que es el **único** punto por el que salen las
+   filas de `planes` (las 5 funciones de datos lo aplican antes de devolver).
+   **Alternativa descartada**: registrar un parser global de tipos de `pg`
+   (`pg.types.setTypeParser(1700, …)`) — es un efecto global sobre cualquier
+   `NUMERIC` de cualquier módulo presente o futuro, justo lo contrario del
+   patrón de factories con DI (C3), y habría cambiado en silencio el
+   comportamiento de módulos que hoy no toco. Hay un test que **demuestra que
+   la trampa existe** (lee la fila con `pool.query` y afirma que el driver
+   devuelve `"19.00"`, un string) además de los que afirman
+   `typeof precio_mensual === 'number'` en POST, GET público, detalle y PATCH,
+   y uno que mira el **texto crudo** de la respuesta (`"precio_mensual":19`, sin
+   comillas).
+3. **`precio_anual` y `ahorro_anual` son derivados y no se persisten.** No son
+   columnas (test contra `information_schema`), se calculan en `toPlan()` y no
+   están en `CAMPOS_EDITABLES`. Mandarlos en el body no hace nada; un `PATCH`
+   que solo los traiga responde `422` y no modifica la fila (test). Motivo: si
+   se guardaran podrían desincronizarse del precio y del descuento — el `%` es
+   la fuente de verdad y es **por plan** (con un 10 % plano, Growth daría
+   539/720 en vez de 540/708; test que lo demuestra).
+4. **CASO CUSTOM (Enterprise), decisión pedida explícitamente por el criterio 6:**
+   con **`es_custom = true` la API devuelve `precio_anual: null` y
+   `ahorro_anual: null`** (nunca `0`). Un plan Custom con `precio_mensual = 0`
+   calcularía `precio_anual = 0` y `ahorro_anual = 0`, y el front acabaría
+   renderizando *"ahorras $0/año"* — exactamente lo que el criterio prohíbe.
+   `null` es un "no aplica" inequívoco y distinguible de un ahorro real de 0
+   (que sí puede darse con `descuento_pct = 0`, y entonces sale `0`, no `null`).
+   **`precio_mensual` y `descuento_pct` sí conservan su valor almacenado** y
+   salen tal cual: son datos que el panel necesita para editarlos, y la web ya
+   decide mostrar "Custom" mirando `es_custom`. Cubierto por 5 tests (el plan
+   real de Enterprise, un Custom con precio > 0, el toggle `es_custom` por
+   `PATCH` en los dos sentidos, el helper puro `toPlan` y este documento).
+5. **`GET /api/admin/precios/:id` sí; `GET /api/admin/precios` (listado) no.**
+   El criterio 7 autoriza el detalle "si lo necesitas para el panel"; un
+   listado admin habría sido un endpoint no pedido, y el listado público ya
+   devuelve **todos** los planes sin filtrar por estado (no hay borradores).
+6. **Validaciones más allá del mínimo del criterio 8**, todas con test y todas
+   para evitar un `500` por entrada del usuario o un dato que rompa al front:
+   - `precio_mensual` > `99999999.99` → `422` (desbordaría `NUMERIC(10,2)` con
+     un `22003` que acabaría en `500`, el mismo tipo de bug que cerró la
+     feature 7 con `parseId`).
+   - `destacado` / `es_custom` deben ser **booleanos** de verdad (`"sí"` → 422),
+     y `orden` un entero ≥ 0 (mismo `parseOrden` que imágenes).
+   - `parseDecimal` es estricto a propósito: `Number('')`, `Number(null)`,
+     `Number([])` y `Number(true)` valen `0`, así que un `Number()` a secas
+     habría aceptado basura como si fuera un precio de 0.
+   - `nombre` se trunca a 120 y `trial_texto` a 200, mismo criterio que el
+     `alt` de imágenes (`ALT_MAX`) y los campos de `POST /api/contact`.
+7. **`updatePlan` es read-then-merge con lista de columnas FIJA**, como
+   `updateImage`/`updateUser`: el `SET` es literal columna por columna, no
+   dinámico, precisamente para que no haya dónde colar una interpolación (C4).
+   Hereda el mismo trade-off ya aceptado en esas dos: sin transacción, dos
+   `PATCH` concurrentes podrían perder un campo (riesgo ~0 con un panel de un
+   solo admin).
+8. **Borrado físico, sin guarda de "último plan".** A diferencia de los
+   usuarios, quedarse sin planes no deja el sistema inaccesible: la sección de
+   precios se vería vacía y se arregla con un `POST`. No se inventa una guarda
+   que el `acceptance` no pide.
+
+### Test existente actualizado (no borrado)
+
+`tests/users.test.js` → *"src/db.js no añade DDL para esta feature…"* afirmaba
+`tablas.sort()).toEqual(['articles', 'images', 'leads', 'users'])`. Esa lista es
+un inventario del DDL de `db.js`, y esta feature **sí** añade una tabla, así que
+pasa a incluir `'planes'` con un comentario que explica el porqué. Lo que ese
+test protege de verdad —que `users` conserve sus 6 columnas, que no aparezca
+`activo` y que el único `ADD COLUMN` sobre `users` siga siendo el `role` de la
+feature 15— queda **intacto**, y el recuento de tests del archivo no cambia
+(53). Ningún test borrado ni marcado `skip`/`todo`/`only` (hay un test nuevo que
+recorre los 13 archivos de `tests/` y lo comprueba).
+
+## Bloqueos
+
+—
+
+## Variables de entorno nuevas
+
+> Solo **nombre y propósito**. Nunca valores.
+
+Ninguna. No se leyó ni se escribió ningún valor de `.env` en toda la sesión.
+Cero dependencias nuevas: `package.json`, `package-lock.json`, `render.yaml` y
+`.node-version` no se tocaron.
+
+## Mapeo criterio → test
+
+Todos en `tests/precios.test.js` salvo donde se indique.
+
+| # | Criterio | `describe` › `it()` |
+|---|---|---|
+| 1 | Tabla en `ensureSchema`, idempotente, `database.md` | *Criterio 1* › "la tabla planes existe…", "el DDL de src/db.js usa CREATE TABLE IF NOT EXISTS y no tiene ningún DROP", "es idempotente: correr ensureSchema de nuevo…", "docs/database.md documenta la tabla planes" |
+| 2 | Columnas y tipos, dinero en `NUMERIC` | *Criterio 2* › "tiene exactamente las columnas esperadas", "precio_mensual y descuento_pct son NUMERIC con la precisión pedida…", "los tipos y NOT NULL/DEFAULT del resto…", "los defaults funcionan…" |
+| 3 | Trampa del `NUMERIC` como string | *Criterio 3* › "el driver `pg` SÍ devuelve NUMERIC como string…", "typeof precio_mensual === 'number' en las respuestas…", "el JSON crudo no lleva los precios entre comillas", "toNumber convierte el string del driver…" |
+| 4 | Derivados, no almacenados | *Criterio 4* › "no existen como columnas en la tabla", "vienen en las respuestas de la API…", "se recalculan al cambiar el precio o el descuento…", "no se pueden enviar: un PATCH que solo trae…", "un POST con precio_anual en el body lo ignora…" |
+| 5 | 19/10→17,24 · 199/10→179,240 · 599/9.85→540,708 | *Criterio 5* › `it.each` de los tres casos (helpers puros), "los tres casos, extremo a extremo por HTTP…", "el ahorro es la diferencia MENSUAL por 12…", "un 10% plano NO reproduce Growth…" |
+| 6 | Caso Custom | *Criterio 6* › "devuelve precio_anual y ahorro_anual en null…", "un plan Custom con precio_mensual > 0 tampoco publica derivados", "quitar es_custom por PATCH…", "toPlan aplica la regla también fuera de HTTP", "la decisión del caso Custom está documentada en progress/current.md" |
+| 7 | Prefijo de rutas y orden | *Criterio 7* › "las cinco rutas están montadas…", "GET /api/precios devuelve { rows } ordenado por `orden` ascendente", "no existe una ruta pública de escritura…", "los 4 planes reales de la web…" |
+| 8 | Validación 422 y 404 | *Criterio 8* › 13 `it()` (nombre, precio negativo, precio no numérico, string numérico, descuento fuera de rango, extremos 0/100, viñetas no-array-de-strings, viñetas válidas, `isStringArray`, booleanos y orden, PATCH vacío, PATCH inválido, 404, desbordamiento de `NUMERIC`) |
+| 9 | `parseId` con guard de `bigint` | *Criterio 9* › "GET …/:id responde 404 para cualquier id inválido", "PATCH y DELETE responden 404…", "el límite exacto de bigint…", "el guard de rango está en el código…" |
+| 10 | 401/403 en escritura, GET público | *Criterio 10* › "401 sin cookie…", "403 con cookie de rol editor…", "el GET de detalle del panel también es solo admin", "ni el anónimo ni el editor modifican nada", "GET /api/precios sigue siendo público" |
+| 11 | C7 y C4 | *Criterio 11* › "src/preciosRouter.js no escribe SQL", "src/precios.js no importa express ni toca req/res", "todo valor de usuario va parametrizado…", "la capa de datos usa una lista de columnas fija…" |
+| 12 | Cero dependencias nuevas | *Criterio 12* › "package.json conserva exactamente las mismas dependencias", "los dos módulos nuevos solo importan lo que ya existía", "el alcance es SOLO PLANES…" |
+| 13 | La suite sigue el patrón del repo | *Criterio 13* › "usa un schema efímero propio y lo limpia", "hay un describe por cada uno de los 15 criterios" |
+| 14 | Documentación | *Criterio 14* › "docs/api-contract.md documenta los endpoints…", "docs/architecture.md documenta la tabla `planes`…", "docs/database.md explica la trampa del NUMERIC…" |
+| 15 | `npm test` verde sin borrar tests | *Criterio 15* › "los 12 archivos de test del baseline siguen existiendo, más este", "ningún test del repo está marcado skip/todo/only", "CAMPOS_EDITABLES no incluye ningún campo derivado" + la corrida completa (abajo) |
+
+## Verificación
+
+```
+pg_isready → /var/run/postgresql:5432 - aceptando conexiones
+
+npm test
+Test Files  13 passed (13)
+     Tests  291 passed (291)
+  Duration  ~28 s
+```
+
+Baseline anterior: **12 archivos / 221 tests** (feature 8). Ahora **13 / 291**:
++70 del archivo nuevo `tests/precios.test.js`, +0 netos en el resto. **Ningún
+test borrado ni marcado `skip`/`todo`/`only`** — hay un test propio que recorre
+los 13 archivos de `tests/` y lo comprueba, además de la lista explícita de los
+12 archivos del baseline.
+
+`npm run test:no-db` sigue en **3 archivos / 30 tests**: `precios.test.js` es de
+integración real y necesita Postgres, así que no entra en el subconjunto en
+seco (mismo criterio que `images` y `users`).
+
+**Estado de la feature:** `done` (`closed: 2026-07-30`) en `feature_list.json`,
+marcada **tras** el APPROVED del reviewer, nunca antes (C14). No se commiteó
+ni se pusheó nada; `git status` sin archivos temporales. No se tocó
+`../maia-landing-front` ni `../maia-landing` (el `contexto_front` de la feature
+traía ya los datos reales; migrar `Pricing.tsx` para consumir esta API está
+fuera de alcance y es trabajo de otro repo).
+
+### Criterios sin test
+
+Ninguno: los 15 tienen al menos un `it()` que los ejercita (tabla de arriba). El
+criterio 15 es, por naturaleza, la corrida completa de la suite; aun así se le
+añadieron tres `it()` estructurales para que no dependa solo de la ejecución.
+
+
+## Cierre — review y menores
+
+**APPROVED sin bloqueantes** (`progress/review_9.md`), cero `[ ]` en C1–C6. El
+reviewer verificó **ejercitando la API en vivo**, no leyendo este informe: la
+aritmética de los tres casos reales de la web (19/10 → 17 y 24; 199/10 → 179 y
+240; 599/9.85 → 540 y 708), que los importes llegan como `number` en el JSON
+HTTP real, que el plan Custom devuelve `null` en los dos derivados, la
+idempotencia del DDL con datos dentro y los permisos.
+
+**Menores atendidos antes de cerrar** (los dos que pidió el líder):
+
+- **Menor 6** — `docs/verification.md` §3 había quedado con un párrafo partido:
+  el texto nuevo se insertó en mitad de la frase del baseline anterior y se leía
+  "…El baseline anterior era 12 archivos / 221 tests. `users.test.js` (53 /
+  tests) entró con la feature 8…". Se recompuso como una **lista de la historia
+  del recuento** (features 9, 8, 7 y 4), con los totales correctos.
+- **Menor 4** — la fila de `feature_list.json` en la tabla de archivos tocados
+  atribuía al implementer el diff entero del archivo (46 líneas). Solo el
+  `status` de la feature 9 es suyo: **las entradas de las features 10 y 11 las
+  añadió el leader**. La fila lo dice ahora explícitamente.
+
+**Menores que quedan abiertos a propósito**, recogidos por el líder como
+features de seguimiento (arreglarlos aquí habría sido scope creep, C12):
+
+- **Menor 1** — `orden` no tiene techo: un entero mayor que `2147483647` acaba
+  en `500` (Postgres `22003` sobre la columna `INTEGER`). El `acceptance` no lo
+  pedía y `src/imagesRouter.js` tiene **exactamente el mismo hueco** desde la
+  feature 7: es deuda del repo, no una regresión. Va a una feature de higiene
+  junto con la deuda equivalente de imágenes.
+- **Menor 2** — el ahorro puede salir **negativo** por el redondeo con precios
+  decimales (`10.50` con `0 %` → `precio_anual = 11` y `ahorro_anual = −6`). No
+  es una desviación: la fórmula es literalmente la que exige el criterio 4 y
+  ningún dato real de la web cae en ese caso (los 4 planes tienen precios
+  enteros). Un clamp a `≥ 0` es decisión del humano.
+- **Menor 3** — `nombre` y `trial_texto` coercionan con `String()` en vez de
+  validar tipo (`{a:1}` → `"[object Object]"`), en paridad exacta con el `alt`
+  de `imagesRouter.js`: es la convención vigente del repo.
+- **Menor 5 (C15)** — el implementer no creó rama ni commiteó nada (instrucción
+  explícita del humano, misma excepción aceptada al cerrar las features 1, 3, 4,
+  5, 7 y 8). Rama y mensaje sugeridos: `feat/9-crud-precios` y
+  `feat(precios): CRUD de planes de la sección de precios`.
+- **Menor 7** — *fuera de esta feature*: un body JSON malformado responde `500`
+  en vez de `400` en **toda** la API, porque `errorHandler` (`src/app.js`)
+  aplasta el `statusCode: 400` de `body-parser`. Es anterior a este trabajo y
+  tiene feature propia.
+
+**Un test más se ajustó al cerrar** (además del de `tests/users.test.js`
+explicado arriba): el `it()` del criterio 6 comprobaba que la decisión del caso
+Custom estuviera escrita en `progress/current.md`. Ese archivo **se vacía** al
+cerrar la sesión (AGENTS.md §5), así que el test se repuntó a los dos sitios
+**duraderos** donde vive la decisión — esta misma entrada de
+`progress/history.md` y `docs/architecture.md` §7.2 — en vez de a un archivo
+transitorio que lo habría roto solo por cerrar la feature. Sigue siendo un test
+por criterio; no se borró ninguno.

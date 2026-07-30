@@ -39,14 +39,15 @@ xRouter.js   → HTTP: validación de entrada, códigos de estado, forma de la r
 x.js         → datos: SQL puro, sin conocer req/res
 ```
 
-`articles.js`, `leads.js`, `images.js` y `users.js` **no importan express** y no
-saben nada de HTTP. `articlesRouter.js`, `leadsRouter.js`, `imagesRouter.js` y
-`usersRouter.js` **no escriben SQL**. Si tu cambio necesita cruzar esa línea, es
-señal de que va en la capa equivocada.
+`articles.js`, `leads.js`, `images.js`, `users.js` y `precios.js` **no importan
+express** y no saben nada de HTTP. `articlesRouter.js`, `leadsRouter.js`,
+`imagesRouter.js`, `usersRouter.js` y `preciosRouter.js` **no escriben SQL**. Si
+tu cambio necesita cruzar esa línea, es señal de que va en la capa equivocada.
 
 Los módulos de datos pueden llevar helpers **puros** además del SQL cuando son
 del dominio de la entidad y se testean solos (`slugify` en `articles.js`;
-`sniffMime`/`MIME_WHITELIST` en `images.js`; `isValidRole` en `users.js`). El
+`sniffMime`/`MIME_WHITELIST` en `images.js`; `isValidRole` en `users.js`;
+`calcPrecioAnual`/`calcAhorroAnual`/`toPlan` en `precios.js`). El
 criterio sigue siendo el mismo: nada que sepa de `req`/`res`. El hasheo de
 contraseñas también vive en la capa de datos (`SALT_ROUNDS` está una sola vez, en
 `users.js`): un router nunca llama a bcrypt.
@@ -82,7 +83,7 @@ console.error('[leads] list error', err);
 ```
 
 Prefijo entre corchetes con el módulo: `[startup]`, `[mail]`, `[auth]`,
-`[leads]`, `[articles]`, `[images]`, `[users]`. **Cero `console.log` de debug** en
+`[leads]`, `[articles]`, `[images]`, `[users]`, `[precios]`. **Cero `console.log` de debug** en
 el código que entregas. Nunca loguees passwords, tokens, hashes ni el contenido
 de `.env`. En las rutas que reciben una contraseña en el body (login,
 `POST`/`PATCH` de usuarios) **no se loguea el body ni el objeto de error

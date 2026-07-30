@@ -122,6 +122,40 @@ export async function ensureSchema(pool, { schema = 'public' } = {}) {
     )
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS images_seccion_orden_idx ON "${schema}".images (seccion, orden)`);
+
+  // --- planes (feature 9: mantenedor de la sección de precios) ---
+  // SOLO PLANES: los complementos y sus paquetes son la feature 10 y no tienen
+  // tabla aquí.
+  //
+  // El dinero va en NUMERIC(10,2), nunca en float/double: un error de coma
+  // flotante en un precio es inaceptable. Ojo al leerlo: el driver `pg`
+  // devuelve NUMERIC como **string**, así que `src/precios.js` lo convierte a
+  // número antes de que salga por la API (ver docs/database.md).
+  //
+  // `precio_anual` y `ahorro_anual` NO son columnas: se DERIVAN de
+  // `precio_mensual` y `descuento_pct` en cada respuesta. Persistirlos
+  // permitiría que se desincronizaran del precio y del descuento.
+  //
+  // `descuento_pct` es por plan (no global): los precios de la web están
+  // redondeados a mano y solo un % por plan los reproduce exactos (Growth
+  // necesita 9,85 % para dar 540 y no 539).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS "${schema}".planes (
+      id               BIGSERIAL PRIMARY KEY,
+      nombre           TEXT NOT NULL,
+      precio_mensual   NUMERIC(10,2) NOT NULL DEFAULT 0,
+      descuento_pct    NUMERIC(5,2)  NOT NULL DEFAULT 0,
+      vinetas          JSONB NOT NULL DEFAULT '[]'::jsonb,
+      vinetas_tachadas JSONB NOT NULL DEFAULT '[]'::jsonb,
+      destacado        BOOLEAN NOT NULL DEFAULT false,
+      trial_texto      TEXT,
+      es_custom        BOOLEAN NOT NULL DEFAULT false,
+      orden            INTEGER NOT NULL DEFAULT 0,
+      created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS planes_orden_idx ON "${schema}".planes (orden)`);
 }
 
 export async function insertLead(pool, lead, { schema = 'public' } = {}) {

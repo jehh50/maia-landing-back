@@ -810,10 +810,12 @@ describe('Criterio 12 — cero cambios en el esquema', { timeout: TIMEOUT_BCRYPT
     const addColumns = dbSrc.match(/ALTER TABLE "\$\{schema\}"\.users ADD COLUMN[^\n]*/g) || [];
     expect(addColumns).toHaveLength(1);
     expect(addColumns[0]).toMatch(/role TEXT NOT NULL DEFAULT 'editor'/);
-    // Y las tablas creadas siguen siendo las cuatro conocidas.
+    // Y las tablas creadas siguen siendo las conocidas. `planes` se sumó con la
+    // feature 9 (CRUD de precios), que sí trae DDL propio; lo que este test
+    // protege es que la feature 8 (y cualquier otra) no toque `users`.
     const tablas = (dbSrc.match(/CREATE TABLE IF NOT EXISTS "\$\{schema\}"\.(\w+)/g) || [])
       .map(m => m.split('.').pop());
-    expect(tablas.sort()).toEqual(['articles', 'images', 'leads', 'users']);
+    expect(tablas.sort()).toEqual(['articles', 'images', 'leads', 'planes', 'users']);
   });
 
   it('ensureSchema sigue siendo idempotente con datos dentro', async () => {
