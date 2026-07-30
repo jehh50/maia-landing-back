@@ -95,6 +95,33 @@ export async function ensureSchema(pool, { schema = 'public' } = {}) {
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS articles_status_idx ON "${schema}".articles (status, published_at DESC)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS articles_slug_idx   ON "${schema}".articles (slug)`);
+
+  // --- images (feature 7: mantenedor de imágenes de secciones) ---
+  // El binario vive en la propia columna `bytes` (BYTEA), no en disco ni en un
+  // proveedor externo: el filesystem de Render es efímero (un archivo escrito
+  // se pierde en cada deploy) y S3/Cloudinary exigiría credenciales nuevas.
+  // Decisión del humano, ver `feature_list.json` (feature 7, `decision_humano`)
+  // y docs/architecture.md §7.
+  //
+  // `bytes` NUNCA se selecciona en las queries de listado/detalle: solo la lee
+  // `GET /api/images/:id/raw` (ver `src/images.js`, constantes `META_COLS` vs
+  // `RAW_COLS`). Es el análogo de la invariante I3 (`password_hash` fuera de
+  // la API) para el binario.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS "${schema}".images (
+      id         BIGSERIAL PRIMARY KEY,
+      seccion    TEXT NOT NULL,
+      filename   TEXT NOT NULL,
+      mime_type  TEXT NOT NULL,
+      bytes      BYTEA NOT NULL,
+      size_bytes INTEGER NOT NULL DEFAULT 0,
+      alt        TEXT,
+      orden      INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS images_seccion_orden_idx ON "${schema}".images (seccion, orden)`);
 }
 
 export async function insertLead(pool, lead, { schema = 'public' } = {}) {

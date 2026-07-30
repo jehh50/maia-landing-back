@@ -138,12 +138,36 @@ describe('Admin /api/admin/articles', () => {
     expect(res.body.article.published_at).not.toBeNull();
   });
 
-  it('DELETE 403 con cookie editor (solo admin)', async () => {
+  // Este test afirmaba 403 hasta la feature 8. El humano confirmó que el rol
+  // `editor` SÍ debe poder eliminar publicaciones (`feature_list.json`, feature
+  // 8, `decision_humano` (a)): el editor "puede ver, crear, editar y eliminar
+  // una publicación". Se ACTUALIZA al comportamiento nuevo (204), no se borra.
+  it('DELETE 204 con cookie editor (el editor sí borra publicaciones, feature 8)', async () => {
     const create = await request(app).post('/api/admin/articles').set('Cookie', editorCookie)
       .send({ title: 'A borrar', body_md: 'x' });
     const id = create.body.article.id;
     const res = await request(app).delete(`/api/admin/articles/${id}`).set('Cookie', editorCookie);
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(204);
+    expect(res.text).toBeFalsy();
+    // Y la fila desaparece de verdad.
+    const { rows } = await pool.query(`SELECT id FROM "${schema}".articles WHERE id = $1`, [id]);
+    expect(rows).toHaveLength(0);
+  });
+
+  it('DELETE sigue exigiendo sesión: 401 sin cookie', async () => {
+    const create = await request(app).post('/api/admin/articles').set('Cookie', adminCookie)
+      .send({ title: 'Sin sesión no se borra', body_md: 'x' });
+    const id = create.body.article.id;
+    const res = await request(app).delete(`/api/admin/articles/${id}`);
+    expect(res.status).toBe(401);
+    // Sigue existiendo.
+    const check = await request(app).get(`/api/admin/articles/${id}`).set('Cookie', adminCookie);
+    expect(check.status).toBe(200);
+  });
+
+  it('DELETE 404 con cookie editor si el artículo no existe', async () => {
+    const res = await request(app).delete('/api/admin/articles/999999').set('Cookie', editorCookie);
+    expect(res.status).toBe(404);
   });
 
   it('DELETE 204 con cookie admin', async () => {
