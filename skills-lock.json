@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "javascript-pro": {
+      "source": "jeffallan/claude-skills",
+      "sourceType": "github",
+      "skillPath": "skills/javascript-pro/SKILL.md",
+      "computedHash": "d5d4526309a674a2ddfd99aa9fb31fe061af225a7b3750eed52a2d38c8ce6041"
+    },
+    "nodejs-backend-patterns": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "skillPath": "plugins/javascript-typescript/skills/nodejs-backend-patterns/SKILL.md",
+      "computedHash": "b63b54d09c77cec0e84cdd42424c12909785f14bdb286c835c45420b885ff1f3"
+    },
+    "postgres-pro": {
+      "source": "jeffallan/claude-skills",
+      "sourceType": "github",
+      "skillPath": "skills/postgres-pro/SKILL.md",
+      "computedHash": "b5385f29408d4bd80666e608dbd7da3d4bed9153afa53b71bda94c6bf7ba8d51"
+    }
+  }
+}
