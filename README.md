@@ -44,5 +44,23 @@ Vía **Nodemailer** sobre SMTP. Configurar `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECUR
 cp .env.example .env
 npm install
 npm run dev        # arranca en http://localhost:3001
-npm test           # corre tests con vitest
+npm test           # corre tests con vitest (requiere Postgres accesible)
 ```
+
+## Documentación
+
+| Archivo | Qué contiene |
+|---|---|
+| `docs/architecture.md` | Cómo está construido el sistema y por qué |
+| `docs/context.md` | Contexto del proyecto y decisiones ya tomadas |
+| `docs/conventions.md` | Estilo, patrones obligatorios y convención de Git |
+| `docs/verification.md` | Cómo verificar que un cambio funciona |
+| `docs/database.md` | Esquema y reglas para tocarlo |
+| `docs/api-contract.md` | Contrato con el frontend |
+
+## Trabajo con agentes de IA
+
+Este repo lleva un arnés para agentes. Punto de entrada: **`AGENTS.md`**.
+El backlog vivo está en `feature_list.json`, el estado de la sesión en
+`progress/current.md`, y los criterios de cierre en `CHECKPOINT.md`.
+Los subagentes (`leader`, `implementer`, `reviewer`) están en `.claude/agents/`.

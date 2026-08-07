@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:no-db": "vitest run tests/phone.test.js tests/email.test.js tests/roles.test.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
@@ -17,6 +18,7 @@
     "express": "^4.21.0",
     "jsonwebtoken": "^9.0.3",
     "libphonenumber-js": "^1.13.3",
+    "multer": "^2.2.0",
     "nodemailer": "^6.10.1",
     "pg": "^8.13.0",
     "resend": "^6.12.4"
